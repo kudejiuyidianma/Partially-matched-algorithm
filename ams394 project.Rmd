@@ -1,0 +1,311 @@
+---
+title: "AMS394 project"
+author: "Yuqing Wang"
+date: '2022-11-19'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+paired_test(sample1, sample2, alternative = c("two.sided", "less", "greater"), mu = 0, conf.level = 0.95, method = c('modified_t.test', 'corrected_z.test'))
+
+
+# Kim et al.’s Modified t-Statistic
+
+```{r case1 t-test n1, n1+n2, n1+n3}
+# Only use n1 for t-test, paired t test
+t.test_case1 <- function(sample1, sample2, alternative, mu, conf.level){
+  diff <- sample1 - sample2
+  return(t.test_case2(diff, alternative = alternative, mu = mu, conf.level = conf.level))
+}
+```
+
+```{r case2 t-test n2, n3(one sample t-test)}
+t.test_case2 <- function(sample, alternative, mu, conf.level){
+  normality <- (shapiro.test(sample)$p.value > conf.level)
+  if(normality){
+    return(t.test(sample, alternative = alternative, mu = mu, conf.level = conf.level))
+  }
+  else{
+    return(wilcox.test(sample, mu=mu, alternative = alternative))
+  }
+  
+}
+```
+
+```{r case3 t-test n1+n2+n3}
+t.test_case3 <- function(n1, n2, n3,alternative,mu,conf.level){
+  
+  x <- n1$sample1
+  y <- n1$sample2
+  diff <- x-y
+ 
+  d <- mean(diff)
+  l1 <- length(n1$sample1)
+  l2 <- length(n2)
+  l3 <- length(n3)
+  nh <- 2/(1/l2+1/l3)
+  t <- mean(n2)
+  n <- mean(n3)
+  sd2 <- sd(diff)**2
+  st2 <- sd(n2)**2
+  sn2 <- sd(n3) **2
+  method <- paste("Modified t-test")                                                                                                                                                                    
+  
+  xbar <- (l1*d+nh*(t-n))
+  se <- sqrt(l1*sd2 + nh**2*(st2/l2+sn2/l3))
+  t3stat <- xbar/se
+  
+  if (alternative == "less") {
+	pval <- pnorm(t3stat)
+	cint <- c(-Inf, t3stat + qnorm(conf.level) )
+    }
+  else if (alternative == "greater") {
+	pval <- pnorm(t3stat, lower.tail = FALSE)
+	cint <- c(t3stat - qnorm(conf.level), Inf)
+    }
+  else {
+	pval <- 2 * pnorm(-abs(t3stat))
+	alpha <- 1 - conf.level
+        cint <- qnorm(1 - alpha/2)
+	cint <- t3stat + c(-cint, cint)
+    }
+  cint <- mu + cint * se
+  names(t3stat) <- "t3"
+  names(mu) <- "difference in means"
+  estimate <- xbar
+	names(estimate) <-"mean of sample"
+  attr(cint,"conf.level") <- conf.level
+  rval <- list(statistic = t3stat,  p.value = pval,
+	       conf.int = cint,  null.value = mu,
+	       alternative = alternative, estimate = estimate,
+	       method = method)
+  class(rval) <- "htest"
+  return(rval)
+}
+```
+
+```{r case4 t-test n2+n3}
+t.test_case4 <- function(n2, n3, alternative, mu,  conf.level){
+  sig.level <- 1 - conf.level
+  normality <- (shapiro.test(n2)$p.value > sig.level) & (shapiro.test(n3)$p.value > sig.level)
+  if(normality){
+    var.equal <- var.test(n2, n3)$p.value > sig.level
+    return(t.test(n2,n3,mu=mu, alternative = alternative, conf.level = conf.level))
+  }
+  else{
+    return(wilcox.test(n2,n3,mu=mu, alternative = alternative, conf.level = conf.level))
+  }
+}
+```
+
+```{r}
+# add alternative, mu, var.equal ,conf.level
+modified_t.test <- function(sample1, sample2, alternative = c("two.sided", "less", "greater"),
+         mu = 0, conf.level = 0.95){
+  if(!missing(mu) && (length(mu) != 1 || is.na(mu)))
+      stop("'mu' must be a single number")
+  if(!missing(conf.level) &&
+      (length(conf.level) != 1 || !is.finite(conf.level) ||
+      conf.level < 0 || conf.level > 1))
+      stop("'conf.level' must be a single number between 0 and 1")
+  # case0: check if two sample are both null
+  if(length(sample1) == 0 && length(sample2) == 0){
+    stop('The input paired samples are empty')
+  }
+  pairedNum <- checkPairedSituation(sample1, sample2)
+  
+  
+  # check pairedNum
+  
+  # n4
+  if(pairedNum$n4 == length(sample1)){
+    stop('The input paired samples only contains NA')
+  }
+  else{
+    alternative <- match.arg(alternative)
+    # n3
+    n <- length(sample1) - pairedNum$n4
+    if(length(pairedNum$n3$sample2) == n){
+      return(t.test_case2(pairedNum$n3$sample2, alternative, mu, conf.level))
+    }
+    # n2
+    if(length(pairedNum$n2$sample1) == n){
+      return(t.test_case2(pairedNum$n2$sample1, alternative, mu, conf.level))
+    }
+    
+    # n1
+    if(length(pairedNum$n1$sample1) == n){
+      return(t.test_case1(pairedNum$n1$sample1, pairedNum$n1$sample2, alternative, mu, conf.level))
+    }
+    # n1 + n2
+    if(length(pairedNum$n2$sample1)+length(pairedNum$n1$sample1) == n){
+      return(t.test_case1(pairedNum$n1$sample1, pairedNum$n1$sample2, alternative, mu, conf.level))
+    }
+    
+    # n1 + n3
+    if(length(pairedNum$n3$sample2)+length(pairedNum$n1$sample1) == n){
+      return(t.test_case1(pairedNum$n1$sample1, pairedNum$n1$sample2, alternative, mu, conf.level))
+    }
+    
+    # n2 + n3
+    if(length(pairedNum$n2$sample1)+length(pairedNum$n3$sample2) == n){
+      return(t.test_case4(pairedNum$n2$sample1, pairedNum$n3$sample2, alternative, mu,  conf.level))
+    }
+    
+    # n1 + n2 + n3
+    if(length(pairedNum$n1$sample1) + length(pairedNum$n2$sample1)+length(pairedNum$n3$sample2) == n){
+      # n2 ==  or n3 == 1
+      if(length(pairedNum$n2$sample1) < 2 || length(pairedNum$n3$sample2) < 2){
+        return(t.test_case1(pairedNum$n1$sample1, pairedNum$n1$sample2, alternative, mu, conf.level))
+      }
+      # n1 == 1
+      if(length(pairedNum$n1$sample1) < 2){
+        # n2+n3
+        if(length(pairedNum$n2$sample1) >= 2 & length(pairedNum$n3$sample2) >= 2){
+          return(t.test_case4(pairedNum$n2$sample1, pairedNum$n3$sample2, alternative, mu,  conf.level))
+        }
+        # n2
+        else if(length(pairedNum$n2$sample1) >= 2 & length(pairedNum$n3$sample2) < 2){
+          return(t.test_case2(pairedNum$n2$sample1, alternative, mu, conf.level))
+        }
+        # n3
+        else if(length(pairedNum$n2$sample1) < 2 & length(pairedNum$n3$sample2) >= 2){
+          return(t.test_case2(pairedNum$n3$sample2, alternative, mu, conf.level))
+        }
+        else{
+          stop('not enough observations')
+        }
+      }
+      sig.level <- 1 - conf.level
+      normality <- (shapiro.test(pairedNum$n2$sample1)$p.value > sig.level) & (shapiro.test(pairedNum$n3$sample2)$p.value > sig.level) & 
+        (shapiro.test(pairedNum$n1$sample1)$p.value > sig.level) & (shapiro.test(pairedNum$n1$sample2)$p.value > sig.level)
+      if(normality){
+        return(t.test_case3(pairedNum$n1, pairedNum$n2$sample1, pairedNum$n3$sample2, alternative, mu, conf.level))
+      }
+      else{
+        return(wilcox.test(pairedNum$n1$sample1+pairedNum$n2$sample1,pairedNum$n1$sample2+pairedNum$n3$sample2,mu=mu, alternative = alternative, conf.level = conf.level))
+      }
+      
+    }
+  }
+  
+}
+```
+
+```{r}
+checkPairedSituation <- function(sample1, sample2){
+  df <- data.frame(sample1,sample2)
+  n1 <- df[!is.na(df$sample1)& !is.na(df$sample2),]
+  n2 <- df[!is.na(df$sample1)& is.na(df$sample2), ]
+  n3 <- df[is.na(df$sample1)& !is.na(df$sample2), ]
+  n4 <- df[is.na(df$sample1)&is.na(df$sample2), ]
+  n4 <- length(n4$sample1)
+  return(list('n1' = n1, 'n2' = n2, 'n3' = n3, 'n4' = n4))
+}
+```
+
+
+# Looney and Jones’s Corrected Z-Test
+```{r}
+corrected_z.test <- function(sample1, sample2, alternative = c("two.sided", "less", "greater"), mu = 0, conf.level = 0.95){
+  if(!missing(mu) && (length(mu) != 1 || is.na(mu)))
+      stop("'mu' must be a single number")
+  
+  if(!missing(conf.level) &&
+      (length(conf.level) != 1 || !is.finite(conf.level) ||
+      conf.level < 0 || conf.level > 1))
+      stop("'conf.level' must be a single number between 0 and 1")
+  
+  
+  
+  # case0: check if two sample are both null
+  if(length(sample1) == 0 && length(sample2) == 0){
+    stop('The input paired samples are empty')
+  }
+  pairedNum <- checkPairedSituation(sample1, sample2)
+  
+  
+  # check pairedNum
+  
+  # n4
+  if(pairedNum$n4 == length(sample1)){
+    stop('The input paired samples only contains NA')
+  }
+  
+  
+  sampleT <- c(pairedNum$n1$sample1, pairedNum$n2$sample1)
+  sampleN <- c(pairedNum$n1$sample2, pairedNum$n3$sample2)
+  
+  sig.level <- 1 - conf.level
+      normality <- (shapiro.test(sampleT)$p.value > sig.level) & (shapiro.test(sampleN)$p.value > sig.level)
+      if(!normality){
+        return(wilcox.test(sampleT,sampleN,mu=mu, alternative = alternative, conf.level = conf.level))
+      }
+  
+  n1 <- length(pairedNum$n1$sample1)
+  if(length(sampleT) < 2 || length(sampleN) < 2){
+    stop('Not enough observations')
+  }
+  t <- mean(sampleT)
+  n <- mean(sampleN)
+  st2 <- sd(sampleT) ** 2
+  sn2 <- sd(sampleN) ** 2
+  stn <- cov(pairedNum$n1$sample1, pairedNum$n1$sample2)
+  nt <- length(sampleT)
+  nn <- length(sampleN)
+  
+  xbar <- t-n
+  se <- sqrt(st2/nt+sn2/nn-2*n1*stn/(nn*nt))
+  zstat <- xbar/se
+  
+  method <- paste("Looney and Jones’s Corrected Z-Test")
+  alternative <- match.arg(alternative)
+  if (alternative == "less") {
+  	pval <- pnorm(zstat)
+  	cint <- c(-Inf, zstat + qnorm(conf.level) )
+    }
+  else if (alternative == "greater") {
+  	pval <- pnorm(zstat, lower.tail = FALSE)
+  	cint <- c(zstat - qnorm(conf.level), Inf)
+    }
+  else {
+	pval <- 2 * pnorm(-abs(zstat))
+	alpha <- 1 - conf.level
+        cint <- qnorm(1 - alpha/2)
+	cint <- zstat + c(-cint, cint)
+    }
+  cint <- mu + cint * se
+  names(zstat) <- "Zcorr"
+  names(mu) <- "difference in means"
+  estimate <- xbar
+	names(estimate) <-"mean of sample"
+  attr(cint,"conf.level") <- conf.level
+  rval <- list(statistic = zstat,  p.value = pval,
+	       conf.int = cint,  null.value = mu,
+	       alternative = alternative, estimate = estimate,
+	       method = method)
+  class(rval) <- "htest"
+  return(rval)
+  
+}
+```
+
+
+```{r}
+paired_test <- function(sample1, sample2, alternative = c("two.sided", "less", "greater"), mu = 0, conf.level = 0.95, method = c('modified_t.test', 'corrected_z.test')){
+  method <- match.arg(method)
+  if(method == 'modified_t.test'){
+    modified_t.test(sample1, sample2, alternative,
+         mu, conf.level)
+  }
+  else{
+    corrected_z.test(sample1, sample2, alternative,
+         mu, conf.level)
+  }
+}
+```
+
